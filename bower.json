@@ -1,6 +1,6 @@
 {
   "name": "aerogear-unified-push",
-  "title": "AeroGear JavaScript Library - DataManager Component",
+  "title": "AeroGear JavaScript Library - UnifiedPush Component",
   "description": "Provides a lightweight set of utilities for communication, security, storage and more.",
   "homepage": "https://github.com/aerogear/aerogear-js",
   "author": {
