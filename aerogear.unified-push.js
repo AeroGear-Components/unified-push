@@ -1,4 +1,4 @@
-/*! AeroGear JavaScript Library - v2.0.0-beta1 - 2014-10-09
+/*! AeroGear JavaScript Library - v1.5.2 - 2014-10-09
 * https://github.com/aerogear/aerogear-js
 * JBoss, Home of Professional Open Source
 * Copyright Red Hat, Inc., and individual contributors
@@ -60,7 +60,7 @@ AeroGear.Core = function() {
                 } else {
                     if( current.name ) {
 
-                        // Merge the Module( authz, datamanger, ... )config with the adapters settings
+                        // Merge the Module( pipeline, datamanger, ... )config with the adapters settings
                         current.settings = AeroGear.extend( current.settings || {}, this.config );
 
                         collection[ current.name ] = AeroGear[ this.lib ].adapters[ current.type || this.type ]( current.name, current.settings );
@@ -72,7 +72,7 @@ AeroGear.Core = function() {
                 return this;
             }
 
-            // Merge the Module( authz, datamanger, ... )config with the adapters settings
+            // Merge the Module( pipeline, datamanger, ... )config with the adapters settings
             // config is an object so use that signature
             config.settings = AeroGear.extend( config.settings || {}, this.config );
 
@@ -85,7 +85,7 @@ AeroGear.Core = function() {
         return this;
     };
     /**
-        This function is used internally by datamanager, etc. to remove an Object (store, etc.) from the respective collection.
+        This function is used internally by pipeline, datamanager, etc. to remove an Object (pipe, store, etc.) from the respective collection.
         @name AeroGear.remove
         @method
         @param {String|String[]|Object[]|Object} config - This can be a variety of types specifying how to remove the object. See the particular constructor for the object calling .remove for more info.
@@ -120,6 +120,17 @@ AeroGear.Core = function() {
 
         return this;
     };
+};
+
+/**
+    Utility function to test if an object is an Array
+    @private
+    @method
+    @deprecated
+    @param {Object} obj - This can be any object to test
+*/
+AeroGear.isArray = function( obj ) {
+    return Array.isArray( obj );
 };
 
 /**
@@ -1016,16 +1027,11 @@ requireModule('promise/polyfill').polyfill();
     @param {String} [settings.accept="application/json"] - the media types which are acceptable for the recipient's response
     @param {String} [settings.contentType="application/json"] - the media type of the entity-body sent to the recipient
     @param {Object} [settings.headers] - the HTTP request headers
+    @param {AeroGear~successCallback} [options.success] - callback to be executed if the AJAX request results in success
+    @param {AeroGear~errorCallback} [options.error] - callback to be executed if the AJAX request results in error
     @param {Object} [settings.params] - contains query parameters to be added in URL in case of GET request or in request body in case of POST and application/x-www-form-urlencoded content type
     @param {Object} [settings.data] - the data to be sent to the recipient
-    @returns {Object} An ES6 Promise - the object returned will look like:
-
-    {
-        data: dataOrError, - the data or an error
-        statusText: statusText, - the status of the response
-        agXHR: request - the xhr request object
-    };
-
+    @returns {Object} An ES6 Promise
     @example
 
         var es6promise = AeroGear.ajax({
@@ -1047,6 +1053,7 @@ AeroGear.ajax = function( settings ) {
             accept = ( settings.accept || "application/json" ).toLowerCase(),
             // TODO: compare contentType by checking if it starts with some value since it might contains the charset as well
             contentType = ( settings.contentType || "application/json" ).toLowerCase(),
+            _oncomplete,
             header,
             name,
             urlEncodedData = [],
@@ -1096,32 +1103,52 @@ AeroGear.ajax = function( settings ) {
         // Success and 400's
         request.onload = function() {
             var status = ( request.status < 400 ) ? "success" : "error",
-                promiseValue = that._createPromiseValue( request, status );
+                callbackArgs = that._createCallbackArgs( request, status ),
+                promiseValue = that._createPromiseValue.apply( this, callbackArgs );
 
             if( status === "success" ) {
-                return resolve( promiseValue );
+                resolve( promiseValue );
+            } else {
+                reject( promiseValue );
             }
 
-            return reject( promiseValue );
+            that._oncomplete( request, status, callbackArgs );
         };
 
         // Network errors
         request.onerror = function() {
-            var status = "error";
+            var status = "error",
+                callbackArgs = that._createCallbackArgs( request, status );
 
-            reject( that._createPromiseValue( request, status ) );
+            reject( that._createPromiseValue.apply( this, callbackArgs ) );
+            that._oncomplete( request, status, callbackArgs );
         };
 
-        // create promise arguments
-        this._createPromiseValue = function( request, status ) {
+        // create callback arguments
+        this._createCallbackArgs = function( request, status ) {
             var statusText = request.statusText || status,
                 dataOrError = ( responseType === 'text' || responseType === '') ? request.responseText : request.response;
 
+            return [ dataOrError, statusText, request ];
+        };
+
+        // create promise value
+        this._createPromiseValue = function( dataOrError, statusText, request ) {
             return {
                 data: dataOrError,
                 statusText: statusText,
                 agXHR: request
             };
+        };
+
+        this._oncomplete = function( request, status, callbackArgs ) {
+            if( settings[ status ] ) {
+                settings[ status ].apply( this, callbackArgs || that._createCallbackArgs( request, status ) );
+            }
+
+            if( settings.complete ) {
+                settings.complete.call( this, "complete", request );
+            }
         };
 
         request.send( data );
@@ -1152,7 +1179,10 @@ AeroGear.ajax = function( settings ) {
             categories: [ "email" ]
         };
 
-        var settings = {};
+        var settings = {
+            success: function(){ ... },
+            error: function() { ... }
+        };
 
         settings.metadata = metadata;
 
@@ -1183,7 +1213,10 @@ AeroGear.ajax = function( settings ) {
             @param {String} [settings.metadata.operatingSystem] - Useful on Hybrid platforms like Apache Cordova to specifiy the underlying operating system.
             @param {String} [settings.metadata.osVersion] - Useful on Hybrid platforms like Apache Cordova to specify the version of the underlying operating system.
             @param {String} [settings.metadata.deviceType] - Useful on Hybrid platforms like Apache Cordova to specify the type of the used device, like iPad or Android-Phone.
-            @returns {Object} An ES6 Promise created by AeroGear.ajax
+            @param {AeroGear~completeCallbackREST} [settings.complete] - a callback to be called when the result of the request to the server is complete, regardless of success
+            @param {AeroGear~errorCallbackREST} [settings.error] - callback to be executed if the AJAX request results in an error
+            @param {AeroGear~successCallbackREST} [settings.success] - callback to be executed if the AJAX request results in success
+            @returns {Object} An Promise created by AeroGear.ajax
          */
         this.registerWithPushServer = function( settings ) {
             settings = settings || {};
@@ -1205,16 +1238,24 @@ AeroGear.ajax = function( settings ) {
                 headers: {
                     "Authorization": "Basic " + window.btoa(variantID + ":" + variantSecret)
                 },
-                data: JSON.stringify( metadata )
+                data: JSON.stringify( metadata ),
+                success: settings.success,
+                error: settings.error,
+                complete: settings.complete
             });
         };
 
         /**
             Performs an unregister request against the UnifiedPush Server for the given deviceToken. The deviceToken identifies the client within its PushNetwork. On Android this is the registrationID, on iOS this is the deviceToken and on SimplePush this is the URL of the given SimplePush server/network.
             @param {String} deviceToken - unique String which identifies the client that is being unregistered.
-            @returns {Object} An ES6 Promise created by AeroGear.ajax
+            @param {Object} [settings = {}] The options to pass in
+            @param {AeroGear~completeCallbackREST} [settings.complete] - a callback to be called when the result of the request to the server is complete, regardless of success
+            @param {AeroGear~errorCallbackREST} [settings.error] - callback to be executed if the AJAX request results in an error
+            @param {AeroGear~successCallbackREST} [settings.success] - callback to be executed if the AJAX request results in success
+            @returns {Object} An Promise created by AeroGear.ajax
          */
-        this.unregisterWithPushServer = function( deviceToken ) {
+        this.unregisterWithPushServer = function( deviceToken, settings ) {
+            settings = settings || {};
             return AeroGear.ajax({
                 contentType: "application/json",
                 dataType: "json",
@@ -1222,7 +1263,10 @@ AeroGear.ajax = function( settings ) {
                 url: pushServerURL + "rest/registry/device/" + deviceToken,
                 headers: {
                     "Authorization": "Basic " + window.btoa(variantID + ":" + variantSecret)
-                }
+                },
+                success: settings.success,
+                error: settings.error,
+                complete: settings.complete
             });
         };
     };
