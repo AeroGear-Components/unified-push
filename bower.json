@@ -24,7 +24,7 @@
       "url": "http://www.apache.org/licenses/LICENSE-2.0"
     }
   ],
-  "version": "2.0.0-beta1",
+  "version": "2.0.0",
   "main": "./aerogear.unified-push.min.js",
   "ignore": [
     "**/.*",
